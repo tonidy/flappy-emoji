@@ -15,7 +15,7 @@ import {
   GAME_WIDTH,
 } from "../config/constants";
 import { GameState, PipeState } from "../types/game";
-import { playSound, flapSound, scoreSound, hitSound } from "../utils/audio";
+import { flapSound, scoreSound, hitSound } from "../utils/audio";
 // Import components
 import Bird from "./Bird";
 import Pipe from "./Pipe";
@@ -26,7 +26,7 @@ const Game = () => {
   // State initializations using imported constants
   const [birdPosition, setBirdPosition] = useState(GAME_HEIGHT / 2 - BIRD_SIZE / 2);
   const [velocityY, setVelocityY] = useState(0);
-  const [gameState, setGameState] = useState<GameState>("idle");
+  const [gameState, setGameState] = useState<GameState>("playing");
   const [pipes, setPipes] = useState<PipeState[]>([]);
   const [score, setScore] = useState(0);
   const timeSinceLastPipe = useRef<number>(0);
@@ -92,7 +92,6 @@ const Game = () => {
 
       // Change 'let' to 'const' as 'updatedPipes' is never reassigned
       const updatedPipes = [...pipes]; // Create a mutable copy for this frame
-      let scoreIncrement = 0; // Track score changes in this frame
 
       for (let i = 0; i < updatedPipes.length; i++) {
         const pipe = updatedPipes[i];
@@ -110,86 +109,63 @@ const Game = () => {
         }
 
         // Check for passing pipe (score point)
-        // If the pipe's right edge has crossed the bird's fixed X position
-        // and the pipe hasn't been marked as passed yet
+        // In the pipe scoring check
         if (!pipe.passed && pipeRight < birdLeft) {
-          // Note: This line modifies an element *within* the const array, which is allowed.
-          // It does not reassign the 'updatedPipes' variable itself.
-          updatedPipes[i] = { ...pipe, passed: true }; // Mark as passed
-          scoreIncrement += 1; // Increment score for this frame
+          updatedPipes[i] = { ...pipe, passed: true };
+          setScore((prevScore) => prevScore + 1);
           if (!collisionDetected) {
-            playSound(scoreSound); // Play score sound
+            playSoundIfEnabled(scoreSound);
           }
         }
-      }
 
-      // --- Update State (use functional updates) ---
-      // Use functional updates to ensure we're modifying the *latest* state
-      setBirdPosition((currentPosition) => {
-        // Apply collision clamping based on the calculated new position
-        if (currentPosition + newVelocityY * timeFactor > GROUND_HEIGHT) return GROUND_HEIGHT;
-        if (currentPosition + newVelocityY * timeFactor < 0) return 0;
-        // Otherwise, return the calculated new position based on the *current* position
-        // Note: We recalculate slightly here to base it off the guaranteed latest 'currentPosition'
-        return currentPosition + (velocityY + GRAVITY * timeFactor) * timeFactor;
-      });
+        // In collision handling
+        if (collisionDetected) {
+          console.log("Collision Detected!");
+          playSoundIfEnabled(hitSound);
+          setGameState("gameOver");
+        } else {
+          // --- Pipe Logic (only if no collision) ---
+          // Fix: Use functional update for pipes to ensure we're using latest state
+          setPipes((currentPipes) => {
+            // Move existing pipes
+            const movedPipes = currentPipes
+              .map((pipe) => ({
+                ...pipe,
+                x: pipe.x - PIPE_SPEED * timeFactor,
+              }))
+              .filter((pipe) => pipe.x > -PIPE_WIDTH);
 
-      setVelocityY((currentVelocity) => {
-        // Apply collision velocity reset based on calculated new position
-        const nextPotentialPos =
-          birdPosition + (currentVelocity + GRAVITY * timeFactor) * timeFactor; // Use latest birdPos here too
-        if (nextPotentialPos >= GROUND_HEIGHT || nextPotentialPos <= 0) return 0;
-        // Otherwise, return the calculated new velocity based on the *current* velocity
-        return currentVelocity + GRAVITY * timeFactor;
-      });
+            return movedPipes;
+          });
 
-      if (scoreIncrement > 0) {
-        setScore((s) => s + scoreIncrement); // This was already functional, which is good
-      }
+          // Generate new pipes
+          timeSinceLastPipe.current += deltaTime;
+          if (timeSinceLastPipe.current > PIPE_INTERVAL) {
+            console.log("Generating New Pipe");
+            timeSinceLastPipe.current = 0;
+            const minTopHeight = 50;
+            const maxTopHeight = GAME_HEIGHT - PIPE_GAP - 50;
+            const topHeight =
+              Math.floor(Math.random() * (maxTopHeight - minTopHeight + 1)) + minTopHeight;
 
-      // --- Handle Collision or Continue Loop ---
-      if (collisionDetected) {
-        console.log("Collision Detected!");
-        playSound(hitSound); // Use imported playSound and hitSound
-        setGameState("gameOver");
-      } else {
-        // --- Pipe Logic (only if no collision) ---
-        const nextPipes = updatedPipes
-          .map((pipe) => ({
-            ...pipe,
-            x: pipe.x - PIPE_SPEED * timeFactor, // Use imported PIPE_SPEED
-          }))
-          .filter((pipe) => pipe.x > -PIPE_WIDTH); // Use imported PIPE_WIDTH
-
-        setPipes(nextPipes);
-
-        // Generate new pipes
-        timeSinceLastPipe.current += deltaTime;
-        if (timeSinceLastPipe.current > PIPE_INTERVAL) {
-          // Use imported PIPE_INTERVAL
-          console.log("Generating New Pipe");
-          timeSinceLastPipe.current = 0;
-          const minTopHeight = 50; // Keep local if only used here
-          const maxTopHeight = GAME_HEIGHT - PIPE_GAP - 50; // Use imported constants
-          const topHeight =
-            Math.floor(Math.random() * (maxTopHeight - minTopHeight + 1)) + minTopHeight;
-
-          setPipes((currentPipes) => [
-            ...currentPipes,
-            {
-              id: nextPipeId.current++,
-              x: GAME_WIDTH, // Use imported GAME_WIDTH
-              topHeight: topHeight,
-              passed: false,
-            },
-          ]);
+            // Fix: Use functional update to ensure we're appending to latest pipe state
+            setPipes((currentPipes) => [
+              ...currentPipes,
+              {
+                id: nextPipeId.current++,
+                x: GAME_WIDTH,
+                topHeight: topHeight,
+                passed: false,
+              },
+            ]);
+          }
+          requestAnimationFrame(gameLoop);
         }
-        requestAnimationFrame(gameLoop);
       }
-       
     },
-    [gameState],
-  ); // Keep dependencies limited
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [birdPosition, gameState, pipes, velocityY],
+  ); // Keep dependencies limited;
 
   // Effect to start/stop the game loop based on gameState
   useEffect(() => {
@@ -218,12 +194,12 @@ const Game = () => {
       setPipes([]);
       nextPipeId.current = 0;
       setScore(0); // Reset score when starting
-      setGameState("playing");
+      setGameState("idle");
       setVelocityY(-JUMP_HEIGHT); // Use imported JUMP_HEIGHT
-      playSound(flapSound); // Use imported playSound and flapSound
+      playSoundIfEnabled(flapSound);
     } else if (gameState === "playing") {
       setVelocityY(-JUMP_HEIGHT); // Use imported JUMP_HEIGHT
-      playSound(flapSound); // Use imported playSound and flapSound
+      playSoundIfEnabled(flapSound);
     }
   };
 
@@ -238,7 +214,7 @@ const Game = () => {
     lastTimeRef.current = null;
     timeSinceLastPipe.current = 0;
     // Set state back to idle, ready for the first click/interaction to start
-    setGameState("idle");
+    setGameState("playing");
   };
 
   // Animation variants for fade in/out
@@ -248,6 +224,24 @@ const Game = () => {
     exit: { opacity: 0 },
   };
 
+  // Add a new state for sound
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Modify the playSound function to respect the sound setting
+  const playSoundIfEnabled = (sound: HTMLAudioElement | null) => {
+    if (soundEnabled && sound) {
+      sound.currentTime = 0;
+      sound.play().catch((error) => console.error("Error playing sound:", error));
+    }
+  };
+
+  // Add a sound toggle handler
+  const handleSoundToggle = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent the game area click from triggering
+    setSoundEnabled((prev) => !prev);
+  };
+
+  // Then in the JSX, add the sound toggle button
   return (
     <div
       onClick={handleInteraction}
@@ -255,16 +249,39 @@ const Game = () => {
         width: GAME_WIDTH,
         height: GAME_HEIGHT,
         backgroundColor: "#71c5cf",
-        overflow: "hidden", // Keep overflow hidden for game area
+        overflow: "hidden",
         position: "relative",
         margin: "auto",
         border: "1px solid black",
         cursor: gameState === "playing" ? "pointer" : "default",
       }}
     >
+      {/* Sound Toggle Button */}
+      <div
+        onClick={handleSoundToggle}
+        style={{
+          position: "absolute",
+          top: "10px",
+          right: "10px",
+          fontSize: "24px",
+          cursor: "pointer",
+          zIndex: 30, // Ensure it's above other elements
+          backgroundColor: "rgba(255, 255, 255, 0.5)",
+          borderRadius: "50%",
+          width: "40px",
+          height: "40px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {soundEnabled ? "🔊" : "🔇"}
+      </div>
+
       {/* Render Score Display only when playing */}
       {gameState === "playing" && <ScoreDisplay score={score} />}
 
+      {/* Rest of the JSX remains the same */}
       {/* Render the Bird component */}
       <Bird y={birdPosition} size={BIRD_SIZE} x={BIRD_START_X} />
 
