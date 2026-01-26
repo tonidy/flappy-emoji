@@ -7,8 +7,6 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-
-
 node_modules
 dist
 dist-ssr
@@ -23,15 +21,13 @@ dist-ssr
 *.sln
 *.sw?
 
-
-
 dev-dist
 dev-dist/*
 
 pnpm-lock.yaml
 bun.lockb
 yarn.lock
-package-lock.json
+# package-lock.json
 
 auto-imports.d.ts
 .eslintrc-auto-import.json
