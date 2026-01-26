@@ -33,6 +33,26 @@ const Game = () => {
   const lastTimeRef = useRef<number | null>(null);
   const nextPipeId = useRef<number>(0);
 
+  // Use refs to track mutable values that don't need to trigger re-renders in the loop
+  const birdPositionRef = useRef(GAME_HEIGHT / 2 - BIRD_SIZE / 2);
+  const velocityYRef = useRef(0);
+  const pipesRef = useRef<PipeState[]>([]);
+  const scoreRef = useRef(0);
+
+  // Sync refs with state
+  useEffect(() => {
+    birdPositionRef.current = birdPosition;
+  }, [birdPosition]);
+  useEffect(() => {
+    velocityYRef.current = velocityY;
+  }, [velocityY]);
+  useEffect(() => {
+    pipesRef.current = pipes;
+  }, [pipes]);
+  useEffect(() => {
+    scoreRef.current = score;
+  }, [score]);
+
   // Game loop logic using imported constants
   const gameLoop = useCallback(
     (currentTime: number) => {
@@ -44,128 +64,123 @@ const Game = () => {
 
       // --- Initial frame setup ---
       if (lastTimeRef.current === null) {
-        lastTimeRef.current = currentTime; // Set the time for the *next* frame calculation
-        requestAnimationFrame(gameLoop); // Request the next frame
-        return; // Skip calculations for this very first frame
+        lastTimeRef.current = currentTime;
+        requestAnimationFrame(gameLoop);
+        return;
       }
 
       // --- Calculate deltaTime and update lastTimeRef ---
       const deltaTime = currentTime - lastTimeRef.current;
-      lastTimeRef.current = currentTime; // Update ref for the *next* frame's calculation
+      lastTimeRef.current = currentTime;
 
       // --- Time normalization ---
       const timeFactor = deltaTime / (1000 / 60);
 
-      // --- Logging ---
-      // Keep the log to verify state changes later
-      console.log(
-        `Game Loop Tick - Delta: ${deltaTime.toFixed(2)}ms, TimeFactor: ${timeFactor.toFixed(2)}, BirdY: ${birdPosition.toFixed(2)}, VelocityY: ${velocityY.toFixed(2)}, Pipes: ${pipes.length}`,
-      );
+      // --- Bird Physics ---
+      let newVelocityY = velocityYRef.current + GRAVITY * timeFactor;
+      let newBirdPosition = birdPositionRef.current + newVelocityY * timeFactor;
 
-      // --- Bird Physics (reads birdPosition, velocityY from potentially stale closure) ---
-      // Calculate changes based on potentially stale values
-      let newVelocityY = velocityY + GRAVITY * timeFactor;
-      let newBirdPosition = birdPosition + newVelocityY * timeFactor;
-
-      // --- Collision Detection (uses calculated newBirdPosition) ---
+      // --- Collision Detection ---
       let collisionDetected = false;
 
       // 1. Ground Collision
       if (newBirdPosition > GROUND_HEIGHT) {
-        newBirdPosition = GROUND_HEIGHT; // Clamp position
-        newVelocityY = 0; // Reset velocity
+        newBirdPosition = GROUND_HEIGHT;
+        newVelocityY = 0;
         collisionDetected = true;
       }
 
       // 2. Ceiling Collision
       if (newBirdPosition < 0) {
-        newBirdPosition = 0; // Clamp position
-        newVelocityY = 0; // Reset velocity
+        newBirdPosition = 0;
+        newVelocityY = 0;
         collisionDetected = true;
       }
 
-      // 3. Pipe Collision & Scoring Check (reads pipes, uses calculated newBirdPosition)
-      const birdLeft = BIRD_START_X; // Use imported BIRD_START_X
-      const birdRight = BIRD_START_X + BIRD_SIZE; // Use imported constants
+      // 3. Pipe Collision & Scoring Check
+      const birdLeft = BIRD_START_X;
+      const birdRight = BIRD_START_X + BIRD_SIZE;
       const birdTop = newBirdPosition;
       const birdBottom = newBirdPosition + BIRD_SIZE;
 
-      // Change 'let' to 'const' as 'updatedPipes' is never reassigned
-      const updatedPipes = [...pipes]; // Create a mutable copy for this frame
+      const currentPipes = pipesRef.current;
 
-      for (let i = 0; i < updatedPipes.length; i++) {
-        const pipe = updatedPipes[i];
+      for (let i = 0; i < currentPipes.length; i++) {
+        const pipe = currentPipes[i];
         const pipeLeft = pipe.x;
         const pipeRight = pipe.x + PIPE_WIDTH;
         const pipeTopHeight = pipe.topHeight;
         const pipeBottomY = pipe.topHeight + PIPE_GAP;
 
-        // Check for collision
+        // Check for collision with pipe
         if (birdRight > pipeLeft && birdLeft < pipeRight) {
           if (birdTop < pipeTopHeight || birdBottom > pipeBottomY) {
             collisionDetected = true;
-            // No need to break here if we still want to check for scoring below
+            break;
           }
         }
 
         // Check for passing pipe (score point)
-        // In the pipe scoring check
         if (!pipe.passed && pipeRight < birdLeft) {
-          updatedPipes[i] = { ...pipe, passed: true };
-          setScore((prevScore) => prevScore + 1);
+          pipe.passed = true;
+          scoreRef.current += 1;
+          setScore(scoreRef.current);
           if (!collisionDetected) {
             playSoundIfEnabled(scoreSound);
           }
         }
-
-        // In collision handling
-        if (collisionDetected) {
-          console.log("Collision Detected!");
-          playSoundIfEnabled(hitSound);
-          setGameState("gameOver");
-        } else {
-          // --- Pipe Logic (only if no collision) ---
-          // Fix: Use functional update for pipes to ensure we're using latest state
-          setPipes((currentPipes) => {
-            // Move existing pipes
-            const movedPipes = currentPipes
-              .map((pipe) => ({
-                ...pipe,
-                x: pipe.x - PIPE_SPEED * timeFactor,
-              }))
-              .filter((pipe) => pipe.x > -PIPE_WIDTH);
-
-            return movedPipes;
-          });
-
-          // Generate new pipes
-          timeSinceLastPipe.current += deltaTime;
-          if (timeSinceLastPipe.current > PIPE_INTERVAL) {
-            console.log("Generating New Pipe");
-            timeSinceLastPipe.current = 0;
-            const minTopHeight = 50;
-            const maxTopHeight = GAME_HEIGHT - PIPE_GAP - 50;
-            const topHeight =
-              Math.floor(Math.random() * (maxTopHeight - minTopHeight + 1)) + minTopHeight;
-
-            // Fix: Use functional update to ensure we're appending to latest pipe state
-            setPipes((currentPipes) => [
-              ...currentPipes,
-              {
-                id: nextPipeId.current++,
-                x: GAME_WIDTH,
-                topHeight: topHeight,
-                passed: false,
-              },
-            ]);
-          }
-          requestAnimationFrame(gameLoop);
-        }
       }
+
+      // Handle collision
+      if (collisionDetected) {
+        console.log("Collision Detected!");
+        playSoundIfEnabled(hitSound);
+        setGameState("gameOver");
+        return;
+      }
+
+      // --- Update bird state ---
+      birdPositionRef.current = newBirdPosition;
+      velocityYRef.current = newVelocityY;
+      setBirdPosition(newBirdPosition);
+      setVelocityY(newVelocityY);
+
+      // --- Pipe Logic ---
+      // Move existing pipes and remove off-screen ones
+      const movedPipes = currentPipes
+        .map((pipe) => ({
+          ...pipe,
+          x: pipe.x - PIPE_SPEED * timeFactor,
+        }))
+        .filter((pipe) => pipe.x > -PIPE_WIDTH);
+
+      // Generate new pipes
+      timeSinceLastPipe.current += deltaTime;
+      if (timeSinceLastPipe.current > PIPE_INTERVAL) {
+        console.log("Generating New Pipe");
+        timeSinceLastPipe.current = 0;
+        const minTopHeight = 50;
+        const maxTopHeight = GAME_HEIGHT - PIPE_GAP - 50;
+        const topHeight =
+          Math.floor(Math.random() * (maxTopHeight - minTopHeight + 1)) + minTopHeight;
+
+        movedPipes.push({
+          id: nextPipeId.current++,
+          x: GAME_WIDTH,
+          topHeight: topHeight,
+          passed: false,
+        });
+      }
+
+      pipesRef.current = movedPipes;
+      setPipes(movedPipes);
+
+      // Continue the loop
+      requestAnimationFrame(gameLoop);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [birdPosition, gameState, pipes, velocityY],
-  ); // Keep dependencies limited;
+    [gameState],
+  );
 
   // Effect to start/stop the game loop based on gameState
   useEffect(() => {
