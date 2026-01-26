@@ -14,7 +14,11 @@ import svgr from "vite-plugin-svgr";
 
 import { fonts } from "./configs/fonts.config";
 
+// Prefer explicit env var VITE_BASE. If not provided, default to '/' for local dev.
+const base = process.env.VITE_BASE ?? "/";
+
 export default defineConfig({
+  base,
   plugins: [
     svgr(),
     react(),
